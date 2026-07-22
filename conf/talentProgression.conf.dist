@@ -1,0 +1,43 @@
+#
+# mod-talent-progression configuration
+#
+
+#
+#    TalentProgression.Enable
+#        Description: Enable 1 talent point per level from 1–MaxLevel (replaces Blizzard L10 start).
+#        Default:     1
+#
+
+TalentProgression.Enable = 1
+
+#
+#    TalentProgression.Announce
+#        Description: Log module presence on world load.
+#        Default:     0
+#
+
+TalentProgression.Announce = 0
+
+#
+#    TalentProgression.MaxLevel
+#        Description: Cap level used for the 1:1 talent curve.
+#        Default:     80
+#
+
+TalentProgression.MaxLevel = 80
+
+#
+#    TalentProgression.FirstKillEnable
+#        Description: Award +1 bonus talent the first time a character kills an allowlisted boss.
+#        Default:     1
+#
+
+TalentProgression.FirstKillEnable = 1
+
+#
+#    TalentProgression.FirstKillAnnounce
+#        Description: Whisper the killer when a first-kill talent is awarded.
+#        Default:     1
+#
+
+TalentProgression.FirstKillAnnounce = 1
