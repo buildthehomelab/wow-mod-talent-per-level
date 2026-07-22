@@ -33,7 +33,7 @@ git submodule add https://github.com/VenomekPL/mod-talent-progression.git mod-ta
 # reconfigure CMake, rebuild, copy conf.dist → conf, restart worldserver
 ```
 
-Character DB table is applied via module SQL updater (`data/sql/updates/db_characters/`).
+Character DB table is applied via module SQL updater (`data/sql/db-characters/base/`).
 
 Reset a character’s first-kill awards during redesign:
 
