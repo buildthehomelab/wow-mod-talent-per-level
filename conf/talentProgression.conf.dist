@@ -28,7 +28,7 @@ TalentProgression.MaxLevel = 80
 
 #
 #    TalentProgression.FirstKillEnable
-#        Description: Award +1 bonus talent the first time a character kills an allowlisted boss.
+#        Description: Award +1 bonus talent the first time a character earns an enabled boss credit.
 #        Default:     1
 #
 
@@ -36,8 +36,37 @@ TalentProgression.FirstKillEnable = 1
 
 #
 #    TalentProgression.FirstKillAnnounce
-#        Description: Whisper the killer when a first-kill talent is awarded.
+#        Description: Whisper the player when a first-kill / retro credit is awarded or revoked.
 #        Default:     1
 #
 
 TalentProgression.FirstKillAnnounce = 1
+
+#
+#    TalentProgression.ReconcileOnLogin
+#        Description: On login, revoke credits no longer in EnabledCredits and grant missing
+#                     credits proven via achievements / IP progression quests (retro).
+#        Default:     1
+#
+
+TalentProgression.ReconcileOnLogin = 1
+
+#
+#    TalentProgression.RetroEnable
+#        Description: During login reconcile, grant credits for past clears proven by
+#                     achievements or Individual Progression hidden quests (66000+N).
+#                     World bosses have no reliable history and are not backfilled.
+#        Default:     1
+#
+
+TalentProgression.RetroEnable = 1
+
+#
+#    TalentProgression.EnabledCredits
+#        Description: Comma-separated credit IDs that grant +1 talent (first earn only).
+#                     Remove an ID to claw back that talent on next login reconcile.
+#                     Empty = enable the full built-in catalog.
+#        Default:     (all catalog credits — see README)
+#
+
+TalentProgression.EnabledCredits = "azuregos,kazzak,ysondre,lethon,emeriss,taerar,doomwalker,doomlord_kazzak,onyxia,ragnaros,nefarian,hakkar,ossirian,cthun,kt_classic,kt_wotlk,gruul,magtheridon,vashj,kaelthas,archimonde,illidan,zuljin,kiljaeden,malygos,sartharion,yogg_saron,anubarak,lich_king,halion,algalon"

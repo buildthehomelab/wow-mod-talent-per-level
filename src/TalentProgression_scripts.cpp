@@ -3,7 +3,8 @@
  * Copyright (C) Aldrynth / VenomekPL
  *
  * Talent curve: 1 point per level from 1–MaxLevel (default 80).
- * First-kill: +1 bonus talent per allowlisted outdoor/raid endboss, once per character.
+ * First-kill / retro: +1 bonus talent per enabled boss credit (CharDB),
+ * with login reconcile for config clawback and achievement/IP retro.
  */
 
 #include "Chat.h"
@@ -13,58 +14,337 @@
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "Tokenize.h"
 #include <algorithm>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace
 {
-    // Outdoor world bosses + canon raid endbosses (not every trash boss).
-    std::unordered_set<uint32> const FirstKillBossEntries = {
-        // Outdoor / world
-        6109,   // Azuregos
-        12397,  // Lord Kazzak
-        14887,  // Ysondre
-        14888,  // Lethon
-        14889,  // Emeriss
-        14890,  // Taerar
-        17711,  // Doomwalker
-        18728,  // Doom Lord Kazzak
+    // IP stores progression as rewarded hidden quests: 66000 + ProgressionState.
+    constexpr uint32 IPP_QUEST_BASE = 66000;
 
-        // Vanilla endbosses
-        10184,  // Onyxia
-        11502,  // Ragnaros
-        11583,  // Nefarian
-        14834,  // Hakkar
-        15339,  // Ossirian
-        15727,  // C'Thun
-        15990,  // Kel'Thuzad
-
-        // TBC endbosses
-        19044,  // Gruul
-        17257,  // Magtheridon
-        21212,  // Lady Vashj
-        19622,  // Kael'thas
-        17968,  // Archimonde
-        22917,  // Illidan
-        23863,  // Zul'jin
-        25315,  // Kil'jaeden
-
-        // WotLK endbosses
-        28859,  // Malygos
-        28860,  // Sartharion
-        33288,  // Yogg-Saron
-        34564,  // Anub'arak
-        36597,  // The Lich King
-        39863,  // Halion
-        32871,  // Algalon
+    struct BossCreditDef
+    {
+        char const* id;
+        char const* displayName;
+        uint32 const* creatureEntries;
+        uint8 creatureCount;
+        uint32 const* achievementIds;
+        uint8 achievementCount;
+        uint32 const* ipProgressionQuests;
+        uint8 ipQuestCount;
     };
 
-    bool IsFirstKillBoss(uint32 entry)
+    // --- creature entry tables ---
+    uint32 const Ent_Azuregos[]        = { 6109 };
+    uint32 const Ent_Kazzak[]          = { 12397 };
+    uint32 const Ent_Ysondre[]         = { 14887 };
+    uint32 const Ent_Lethon[]          = { 14888 };
+    uint32 const Ent_Emeriss[]         = { 14889 };
+    uint32 const Ent_Taerar[]          = { 14890 };
+    uint32 const Ent_Doomwalker[]      = { 17711 };
+    uint32 const Ent_DoomlordKazzak[]  = { 18728 };
+    uint32 const Ent_Onyxia[]          = { 10184, 301000 }; // WotLK + IP classic
+    uint32 const Ent_Ragnaros[]        = { 11502 };
+    uint32 const Ent_Nefarian[]        = { 11583 };
+    uint32 const Ent_Hakkar[]          = { 14834 };
+    uint32 const Ent_Ossirian[]        = { 15339 };
+    uint32 const Ent_Cthun[]           = { 15727 };
+    uint32 const Ent_KtClassic[]       = { 351019 }; // IP Naxx40
+    uint32 const Ent_KtWotlk[]         = { 15990 };
+    uint32 const Ent_Gruul[]           = { 19044 };
+    uint32 const Ent_Magtheridon[]     = { 17257 };
+    uint32 const Ent_Vashj[]           = { 21212 };
+    uint32 const Ent_Kaelthas[]        = { 19622 };
+    uint32 const Ent_Archimonde[]      = { 17968 };
+    uint32 const Ent_Illidan[]         = { 22917 };
+    uint32 const Ent_Zuljin[]          = { 23863 };
+    uint32 const Ent_Kiljaeden[]       = { 25315 };
+    uint32 const Ent_Malygos[]         = { 28859 };
+    uint32 const Ent_Sartharion[]      = { 28860 };
+    uint32 const Ent_Yogg[]            = { 33288 };
+    uint32 const Ent_Anubarak[]        = { 34564 };
+    uint32 const Ent_LichKing[]        = { 36597 };
+    uint32 const Ent_Halion[]          = { 39863 };
+    uint32 const Ent_Algalon[]         = { 32871 };
+
+    // --- achievement tables (any match = proven) ---
+    uint32 const Ach_Onyxia[]          = { 684 };
+    uint32 const Ach_Ragnaros[]        = { 686 };
+    uint32 const Ach_Nefarian[]        = { 685 };
+    uint32 const Ach_Hakkar[]          = { 688 };
+    uint32 const Ach_Ossirian[]        = { 689 };
+    uint32 const Ach_Cthun[]           = { 687 };
+    uint32 const Ach_KtClassic[]       = { 533 };          // IP custom
+    uint32 const Ach_KtWotlk[]         = { 574, 575 };
+    uint32 const Ach_Gruul[]           = { 692 };
+    uint32 const Ach_Magtheridon[]     = { 693 };
+    uint32 const Ach_Vashj[]           = { 694 };
+    uint32 const Ach_Kaelthas[]        = { 696 };
+    uint32 const Ach_Archimonde[]      = { 695 };
+    uint32 const Ach_Illidan[]         = { 697 };
+    uint32 const Ach_Zuljin[]          = { 691 };
+    uint32 const Ach_Kiljaeden[]       = { 698 };
+    uint32 const Ach_Malygos[]         = { 622, 623 };
+    uint32 const Ach_Sartharion[]      = { 1876, 625 };
+    uint32 const Ach_Yogg[]            = { 2892, 2893 };
+    uint32 const Ach_Anubarak[]        = { 3916, 3917 };
+    uint32 const Ach_LichKing[]        = { 4530, 4597 };
+    uint32 const Ach_Halion[]          = { 4815, 4817 };
+    uint32 const Ach_Algalon[]         = { 3036, 3037 };
+
+    // --- IP progression quest tables (66000 + ProgressionState) ---
+    uint32 const Quest_Onyxia[]        = { IPP_QUEST_BASE + 2 };
+    uint32 const Quest_Ragnaros[]      = { IPP_QUEST_BASE + 1 };
+    uint32 const Quest_Nefarian[]      = { IPP_QUEST_BASE + 3 };
+    uint32 const Quest_Cthun[]         = { IPP_QUEST_BASE + 6 };
+    uint32 const Quest_KtClassic[]     = { IPP_QUEST_BASE + 7 };
+    uint32 const Quest_KtWotlk[]       = { IPP_QUEST_BASE + 14 };
+    uint32 const Quest_Kaelthas[]      = { IPP_QUEST_BASE + 10 };
+    uint32 const Quest_Illidan[]       = { IPP_QUEST_BASE + 12 };
+    uint32 const Quest_Kiljaeden[]     = { IPP_QUEST_BASE + 13 };
+    uint32 const Quest_Yogg[]          = { IPP_QUEST_BASE + 15 };
+    uint32 const Quest_Anubarak[]      = { IPP_QUEST_BASE + 16 };
+    uint32 const Quest_LichKing[]      = { IPP_QUEST_BASE + 17 };
+    uint32 const Quest_Halion[]        = { IPP_QUEST_BASE + 18 };
+
+#define TP_ARR(a) (a), uint8(sizeof(a) / sizeof((a)[0]))
+#define TP_NONE   nullptr, uint8(0)
+
+    BossCreditDef const Catalog[] = {
+        { "azuregos",        "Azuregos",                 TP_ARR(Ent_Azuregos),       TP_NONE,                 TP_NONE },
+        { "kazzak",          "Lord Kazzak",              TP_ARR(Ent_Kazzak),         TP_NONE,                 TP_NONE },
+        { "ysondre",         "Ysondre",                  TP_ARR(Ent_Ysondre),        TP_NONE,                 TP_NONE },
+        { "lethon",          "Lethon",                   TP_ARR(Ent_Lethon),         TP_NONE,                 TP_NONE },
+        { "emeriss",         "Emeriss",                  TP_ARR(Ent_Emeriss),        TP_NONE,                 TP_NONE },
+        { "taerar",          "Taerar",                   TP_ARR(Ent_Taerar),         TP_NONE,                 TP_NONE },
+        { "doomwalker",      "Doomwalker",               TP_ARR(Ent_Doomwalker),     TP_NONE,                 TP_NONE },
+        { "doomlord_kazzak", "Doom Lord Kazzak",         TP_ARR(Ent_DoomlordKazzak), TP_NONE,                 TP_NONE },
+
+        { "onyxia",          "Onyxia",                   TP_ARR(Ent_Onyxia),         TP_ARR(Ach_Onyxia),      TP_ARR(Quest_Onyxia) },
+        { "ragnaros",        "Ragnaros",                 TP_ARR(Ent_Ragnaros),       TP_ARR(Ach_Ragnaros),    TP_ARR(Quest_Ragnaros) },
+        { "nefarian",        "Nefarian",                 TP_ARR(Ent_Nefarian),       TP_ARR(Ach_Nefarian),    TP_ARR(Quest_Nefarian) },
+        { "hakkar",          "Hakkar",                   TP_ARR(Ent_Hakkar),         TP_ARR(Ach_Hakkar),      TP_NONE },
+        { "ossirian",        "Ossirian the Unscarred",   TP_ARR(Ent_Ossirian),       TP_ARR(Ach_Ossirian),    TP_NONE },
+        { "cthun",           "C'Thun",                   TP_ARR(Ent_Cthun),          TP_ARR(Ach_Cthun),       TP_ARR(Quest_Cthun) },
+        { "kt_classic",      "Kel'Thuzad (Classic)",     TP_ARR(Ent_KtClassic),      TP_ARR(Ach_KtClassic),   TP_ARR(Quest_KtClassic) },
+        { "kt_wotlk",        "Kel'Thuzad (WotLK)",       TP_ARR(Ent_KtWotlk),        TP_ARR(Ach_KtWotlk),     TP_ARR(Quest_KtWotlk) },
+
+        { "gruul",           "Gruul the Dragonkiller",   TP_ARR(Ent_Gruul),          TP_ARR(Ach_Gruul),       TP_NONE },
+        { "magtheridon",     "Magtheridon",              TP_ARR(Ent_Magtheridon),    TP_ARR(Ach_Magtheridon), TP_NONE },
+        { "vashj",           "Lady Vashj",               TP_ARR(Ent_Vashj),          TP_ARR(Ach_Vashj),       TP_NONE },
+        { "kaelthas",        "Kael'thas Sunstrider",     TP_ARR(Ent_Kaelthas),       TP_ARR(Ach_Kaelthas),    TP_ARR(Quest_Kaelthas) },
+        { "archimonde",      "Archimonde",               TP_ARR(Ent_Archimonde),     TP_ARR(Ach_Archimonde),  TP_NONE },
+        { "illidan",         "Illidan Stormrage",        TP_ARR(Ent_Illidan),        TP_ARR(Ach_Illidan),     TP_ARR(Quest_Illidan) },
+        { "zuljin",          "Zul'jin",                  TP_ARR(Ent_Zuljin),         TP_ARR(Ach_Zuljin),      TP_NONE },
+        { "kiljaeden",       "Kil'jaeden",               TP_ARR(Ent_Kiljaeden),      TP_ARR(Ach_Kiljaeden),   TP_ARR(Quest_Kiljaeden) },
+
+        { "malygos",         "Malygos",                  TP_ARR(Ent_Malygos),        TP_ARR(Ach_Malygos),     TP_NONE },
+        { "sartharion",      "Sartharion",               TP_ARR(Ent_Sartharion),     TP_ARR(Ach_Sartharion),  TP_NONE },
+        { "yogg_saron",      "Yogg-Saron",               TP_ARR(Ent_Yogg),           TP_ARR(Ach_Yogg),        TP_ARR(Quest_Yogg) },
+        { "anubarak",        "Anub'arak",                TP_ARR(Ent_Anubarak),       TP_ARR(Ach_Anubarak),    TP_ARR(Quest_Anubarak) },
+        { "lich_king",       "The Lich King",            TP_ARR(Ent_LichKing),       TP_ARR(Ach_LichKing),    TP_ARR(Quest_LichKing) },
+        { "halion",          "Halion",                   TP_ARR(Ent_Halion),         TP_ARR(Ach_Halion),      TP_ARR(Quest_Halion) },
+        { "algalon",         "Algalon the Observer",     TP_ARR(Ent_Algalon),        TP_ARR(Ach_Algalon),     TP_NONE },
+    };
+
+#undef TP_ARR
+#undef TP_NONE
+
+    std::unordered_set<std::string> EnabledCredits;
+    std::unordered_map<uint32, std::string> EntryToCredit;
+    std::unordered_map<std::string, BossCreditDef const*> CreditById;
+
+    std::string SanitizeCreditId(std::string const& creditId)
     {
-        return FirstKillBossEntries.find(entry) != FirstKillBossEntries.end();
+        std::string out;
+        out.reserve(creditId.size());
+        for (char ch : creditId)
+        {
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_')
+                out.push_back(ch);
+        }
+        return out;
     }
 
-    void TryAwardFirstKillTalent(Player* player, Creature* killed)
+    void RebuildRuntimeMaps()
+    {
+        EnabledCredits.clear();
+        EntryToCredit.clear();
+        CreditById.clear();
+
+        for (BossCreditDef const& def : Catalog)
+            CreditById.emplace(def.id, &def);
+
+        std::string raw = sConfigMgr->GetOption<std::string>("TalentProgression.EnabledCredits", "");
+        if (raw.size() >= 2 && ((raw.front() == '"' && raw.back() == '"') || (raw.front() == '\'' && raw.back() == '\'')))
+            raw = raw.substr(1, raw.size() - 2);
+
+        if (raw.empty())
+        {
+            for (BossCreditDef const& def : Catalog)
+                EnabledCredits.insert(def.id);
+        }
+        else
+        {
+            for (std::string_view token : Acore::Tokenize(raw, ',', false))
+            {
+                while (!token.empty() && (token.front() == ' ' || token.front() == '\t'))
+                    token.remove_prefix(1);
+                while (!token.empty() && (token.back() == ' ' || token.back() == '\t'))
+                    token.remove_suffix(1);
+                if (token.empty())
+                    continue;
+
+                std::string id(token);
+                if (CreditById.find(id) == CreditById.end())
+                {
+                    LOG_WARN("module", "TalentProgression: unknown credit '{}' in EnabledCredits — ignored", id);
+                    continue;
+                }
+                EnabledCredits.insert(id);
+            }
+        }
+
+        for (std::string const& id : EnabledCredits)
+        {
+            BossCreditDef const* def = CreditById[id];
+            for (uint8 i = 0; i < def->creatureCount; ++i)
+                EntryToCredit[def->creatureEntries[i]] = id;
+        }
+
+        LOG_INFO("server.loading", "TalentProgression: {} boss credits enabled", EnabledCredits.size());
+    }
+
+    bool IsCreditEnabled(std::string const& creditId)
+    {
+        return EnabledCredits.find(creditId) != EnabledCredits.end();
+    }
+
+    bool PlayerHasCredit(uint32 guid, std::string const& creditId)
+    {
+        std::string safe = SanitizeCreditId(creditId);
+        if (safe.empty())
+            return false;
+
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT 1 FROM aldr_first_kill_talent WHERE guid = {} AND credit_id = '{}'",
+            guid, safe);
+        return result != nullptr;
+    }
+
+    std::unordered_set<std::string> LoadPlayerCredits(uint32 guid)
+    {
+        std::unordered_set<std::string> have;
+        QueryResult result = CharacterDatabase.Query(
+            "SELECT credit_id FROM aldr_first_kill_talent WHERE guid = {}", guid);
+        if (!result)
+            return have;
+
+        do
+        {
+            have.insert(SanitizeCreditId((*result)[0].Get<std::string>()));
+        } while (result->NextRow());
+
+        return have;
+    }
+
+    void SafeRemoveBonusTalent(Player* player, uint32 count)
+    {
+        if (!player || !count)
+            return;
+
+        uint32 cur = player->GetBonusTalentCount();
+        if (cur <= count)
+            player->SetBonusTalentCount(0);
+        else
+            player->RemoveBonusTalent(count);
+    }
+
+    bool HasProvenCredit(Player* player, BossCreditDef const& def)
+    {
+        for (uint8 i = 0; i < def.achievementCount; ++i)
+            if (def.achievementIds[i] && player->HasAchieved(def.achievementIds[i]))
+                return true;
+
+        for (uint8 i = 0; i < def.ipQuestCount; ++i)
+            if (def.ipProgressionQuests[i] && player->GetQuestRewardStatus(def.ipProgressionQuests[i]))
+                return true;
+
+        return false;
+    }
+
+    void InsertCreditRow(uint32 guid, std::string const& creditId, uint32 sourceEntry)
+    {
+        std::string safe = SanitizeCreditId(creditId);
+        if (safe.empty())
+            return;
+
+        CharacterDatabase.DirectExecute(
+            "INSERT INTO aldr_first_kill_talent (guid, credit_id, source_entry) VALUES ({}, '{}', {})",
+            guid, safe, sourceEntry);
+    }
+
+    void DeleteCreditRow(uint32 guid, std::string const& creditId)
+    {
+        std::string safe = SanitizeCreditId(creditId);
+        if (safe.empty())
+            return;
+
+        CharacterDatabase.DirectExecute(
+            "DELETE FROM aldr_first_kill_talent WHERE guid = {} AND credit_id = '{}'",
+            guid, safe);
+    }
+
+    void AwardCredit(Player* player, BossCreditDef const& def, uint32 sourceEntry, char const* reason, bool refreshTalents)
+    {
+        if (!player)
+            return;
+
+        uint32 guid = player->GetGUID().GetCounter();
+        if (PlayerHasCredit(guid, def.id))
+            return;
+
+        InsertCreditRow(guid, def.id, sourceEntry);
+        player->RewardExtraBonusTalentPoints(1);
+        if (refreshTalents)
+            player->InitTalentForLevel();
+
+        if (sConfigMgr->GetOption<bool>("TalentProgression.FirstKillAnnounce", true))
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "Talent credit: {} — +1 talent point ({})", def.displayName, reason);
+
+        LOG_INFO("module", "TalentProgression: {} awarded '{}' via {} (entry {})",
+            player->GetName(), def.id, reason, sourceEntry);
+    }
+
+    void RevokeCredit(Player* player, std::string const& creditId, bool whisper, bool refreshTalents)
+    {
+        if (!player)
+            return;
+
+        uint32 guid = player->GetGUID().GetCounter();
+        DeleteCreditRow(guid, creditId);
+        SafeRemoveBonusTalent(player, 1);
+
+        char const* name = creditId.c_str();
+        if (auto it = CreditById.find(creditId); it != CreditById.end())
+            name = it->second->displayName;
+
+        if (whisper && sConfigMgr->GetOption<bool>("TalentProgression.FirstKillAnnounce", true))
+            ChatHandler(player->GetSession()).PSendSysMessage(
+                "Talent credit removed: {} — -1 talent point (no longer on the allowlist)", name);
+
+        if (refreshTalents)
+            player->InitTalentForLevel();
+
+        LOG_INFO("module", "TalentProgression: {} revoked '{}'", player->GetName(), creditId);
+    }
+
+    void TryAwardKillCredit(Player* player, Creature* killed)
     {
         if (!player || !killed)
             return;
@@ -75,33 +355,62 @@ namespace
         if (!sConfigMgr->GetOption<bool>("TalentProgression.FirstKillEnable", true))
             return;
 
-        uint32 entry = killed->GetEntry();
-        if (!IsFirstKillBoss(entry))
+        auto it = EntryToCredit.find(killed->GetEntry());
+        if (it == EntryToCredit.end())
+            return;
+
+        auto defIt = CreditById.find(it->second);
+        if (defIt == CreditById.end() || !IsCreditEnabled(defIt->second->id))
+            return;
+
+        AwardCredit(player, *defIt->second, killed->GetEntry(), "first kill", true);
+    }
+
+    void ReconcilePlayerCredits(Player* player)
+    {
+        if (!player)
+            return;
+
+        if (!sConfigMgr->GetOption<bool>("TalentProgression.Enable", true))
+            return;
+
+        if (!sConfigMgr->GetOption<bool>("TalentProgression.FirstKillEnable", true))
+            return;
+
+        if (!sConfigMgr->GetOption<bool>("TalentProgression.ReconcileOnLogin", true))
             return;
 
         uint32 guid = player->GetGUID().GetCounter();
-        QueryResult existing = CharacterDatabase.Query(
-            "SELECT 1 FROM aldr_first_kill_talent WHERE guid = {} AND creature_entry = {}",
-            guid, entry);
-        if (existing)
-            return;
+        std::unordered_set<std::string> have = LoadPlayerCredits(guid);
+        bool changed = false;
 
-        CharacterDatabase.DirectExecute(
-            "INSERT INTO aldr_first_kill_talent (guid, creature_entry) VALUES ({}, {})",
-            guid, entry);
-
-        player->RewardExtraBonusTalentPoints(1);
-        player->InitTalentForLevel();
-
-        if (sConfigMgr->GetOption<bool>("TalentProgression.FirstKillAnnounce", true))
+        for (std::string const& creditId : have)
         {
-            std::string bossName = killed->GetName();
-            ChatHandler(player->GetSession()).PSendSysMessage(
-                "First kill of {} — you earned +1 talent point!", bossName);
+            if (creditId.empty() || IsCreditEnabled(creditId))
+                continue;
+
+            RevokeCredit(player, creditId, true, false);
+            changed = true;
         }
 
-        LOG_INFO("module", "TalentProgression: {} earned first-kill talent for entry {}",
-            player->GetName(), entry);
+        if (sConfigMgr->GetOption<bool>("TalentProgression.RetroEnable", true))
+        {
+            for (std::string const& creditId : EnabledCredits)
+            {
+                if (PlayerHasCredit(guid, creditId))
+                    continue;
+
+                auto defIt = CreditById.find(creditId);
+                if (defIt == CreditById.end() || !HasProvenCredit(player, *defIt->second))
+                    continue;
+
+                AwardCredit(player, *defIt->second, 0, "retro", false);
+                changed = true;
+            }
+        }
+
+        if (changed)
+            player->InitTalentForLevel();
     }
 }
 
@@ -109,10 +418,16 @@ class TalentProgression_Player : public PlayerScript
 {
 public:
     TalentProgression_Player() : PlayerScript("TalentProgression_Player", {
+        PLAYERHOOK_ON_LOGIN,
         PLAYERHOOK_ON_CALCULATE_TALENTS_POINTS,
         PLAYERHOOK_ON_CREATURE_KILL,
         PLAYERHOOK_ON_CREATURE_KILLED_BY_PET
     }) { }
+
+    void OnPlayerLogin(Player* player) override
+    {
+        ReconcilePlayerCredits(player);
+    }
 
     void OnPlayerCalculateTalentsPoints(Player const* player, uint32& talentPointsForLevel) override
     {
@@ -122,7 +437,6 @@ public:
         uint8 maxLevel = sConfigMgr->GetOption<uint8>("TalentProgression.MaxLevel", 80);
         uint8 level = std::min<uint8>(player->GetLevel(), maxLevel);
 
-        // talentPointsForLevel currently == blizzBase + m_extraBonusTalentCount
         uint32 blizzBase = level < 10 ? 0 : uint32(level) - 9;
         uint32 bonus = talentPointsForLevel > blizzBase ? talentPointsForLevel - blizzBase : 0;
         talentPointsForLevel = uint32(level) + bonus;
@@ -130,12 +444,12 @@ public:
 
     void OnPlayerCreatureKill(Player* killer, Creature* killed) override
     {
-        TryAwardFirstKillTalent(killer, killed);
+        TryAwardKillCredit(killer, killed);
     }
 
     void OnPlayerCreatureKilledByPet(Player* petOwner, Creature* killed) override
     {
-        TryAwardFirstKillTalent(petOwner, killed);
+        TryAwardKillCredit(petOwner, killed);
     }
 };
 
@@ -149,12 +463,16 @@ public:
         if (!sConfigMgr->GetOption<bool>("TalentProgression.Enable", true))
             return;
 
+        RebuildRuntimeMaps();
+
         if (sConfigMgr->GetOption<bool>("TalentProgression.Announce", false))
             LOG_INFO("server.loading",
-                "TalentProgression: 1 talent/level through {} + first-kill boss bonuses",
-                sConfigMgr->GetOption<uint8>("TalentProgression.MaxLevel", 80));
+                "TalentProgression: 1 talent/level through {} + {} first-kill credits (reconcile/retro)",
+                sConfigMgr->GetOption<uint8>("TalentProgression.MaxLevel", 80),
+                EnabledCredits.size());
         else
-            LOG_INFO("server.loading", "TalentProgression: module present");
+            LOG_INFO("server.loading", "TalentProgression: module present ({} credits enabled)",
+                EnabledCredits.size());
     }
 };
 
