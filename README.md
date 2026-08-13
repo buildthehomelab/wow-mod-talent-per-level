@@ -7,7 +7,7 @@ Aldrynth custom AzerothCore module: talent points from level 1, plus configurabl
 1. **Curve** — 1 talent point per level for levels 1–`TalentProgression.MaxLevel` (default 80). Replaces Blizzard’s “talents start at 10” curve. Does **not** use `Rate.Talent = 2`.
 2. **Boss credits** — +1 permanent bonus talent per enabled credit ID (first earn only). Tracked in CharDB `aldr_first_kill_talent` by `credit_id`.
 3. **Config allowlist** — `TalentProgression.EnabledCredits` controls which bosses grant talents. Remove an ID → clawed back on next login reconcile.
-4. **Retro** — on login, missing raid credits proven by achievements and/or Individual Progression quests (`66000+N`) are granted. Outdoor world bosses are kill-only (no history).
+4. **Retro** — on login, missing raid credits proven by **achievements** (actual kill) are granted. Individual Progression hidden quests are not used: IP fills skipped ladder states (killing Onyxia also stamps “MC complete”), which is not a Ragnaros kill. Outdoor world bosses are kill-only (no history).
 5. **Double Kel'Thuzad** — `kt_classic` (IP entry `351019`) and `kt_wotlk` (`15990`) are separate credits.
 
 ## Config
@@ -28,12 +28,12 @@ Aldrynth custom AzerothCore module: talent points from level 1, plus configurabl
 | Credit ID | Boss | Kill entries | Retro |
 |-----------|------|--------------|-------|
 | `azuregos` … `doomlord_kazzak` | Outdoor world bosses | vanilla entries | kill only |
-| `onyxia` | Onyxia | `10184`, `301000` (IP) | ach 684 / IP quest |
-| `ragnaros` … `cthun` | Vanilla ends | standard | ach + IP where mapped |
-| `kt_classic` | Kel'Thuzad (Classic Naxx40) | `351019` | ach 533 / IP `66007` |
-| `kt_wotlk` | Kel'Thuzad (WotLK) | `15990` | ach 574/575 / IP `66014` |
-| `gruul` … `kiljaeden` | TBC ends | standard | ach (+ IP for some) |
-| `malygos` … `algalon` | WotLK ends | standard | ach (+ IP for some) |
+| `onyxia` | Onyxia | `10184`, `301000` (IP) | ach 684 |
+| `ragnaros` … `cthun` | Vanilla ends | standard | matching kill achievement |
+| `kt_classic` | Kel'Thuzad (Classic Naxx40) | `351019` | ach 533 |
+| `kt_wotlk` | Kel'Thuzad (WotLK) | `15990` | ach 574/575 |
+| `gruul` … `kiljaeden` | TBC ends | standard | matching kill achievement |
+| `malygos` … `algalon` | WotLK ends | standard | matching kill achievement |
 
 ## Install
 

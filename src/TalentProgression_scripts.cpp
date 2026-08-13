@@ -4,7 +4,9 @@
  *
  * Talent curve: 1 point per level from 1–MaxLevel (default 80).
  * First-kill / retro: +1 bonus talent per enabled boss credit (CharDB),
- * with login reconcile for config clawback and achievement/IP retro.
+ * with login reconcile for config clawback and achievement retro.
+ * Individual Progression hidden quests are not kill proof — IP fills skipped
+ * ladder states (e.g. Onyxia also stamps "MC complete").
  */
 
 #include "Chat.h"
@@ -23,9 +25,6 @@
 
 namespace
 {
-    // IP stores progression as rewarded hidden quests: 66000 + ProgressionState.
-    constexpr uint32 IPP_QUEST_BASE = 66000;
-
     struct BossCreditDef
     {
         char const* id;
@@ -34,8 +33,6 @@ namespace
         uint8 creatureCount;
         uint32 const* achievementIds;
         uint8 achievementCount;
-        uint32 const* ipProgressionQuests;
-        uint8 ipQuestCount;
     };
 
     // --- creature entry tables ---
@@ -96,59 +93,44 @@ namespace
     uint32 const Ach_Halion[]          = { 4815, 4817 };
     uint32 const Ach_Algalon[]         = { 3036, 3037 };
 
-    // --- IP progression quest tables (66000 + ProgressionState) ---
-    uint32 const Quest_Onyxia[]        = { IPP_QUEST_BASE + 2 };
-    uint32 const Quest_Ragnaros[]      = { IPP_QUEST_BASE + 1 };
-    uint32 const Quest_Nefarian[]      = { IPP_QUEST_BASE + 3 };
-    uint32 const Quest_Cthun[]         = { IPP_QUEST_BASE + 6 };
-    uint32 const Quest_KtClassic[]     = { IPP_QUEST_BASE + 7 };
-    uint32 const Quest_KtWotlk[]       = { IPP_QUEST_BASE + 14 };
-    uint32 const Quest_Kaelthas[]      = { IPP_QUEST_BASE + 10 };
-    uint32 const Quest_Illidan[]       = { IPP_QUEST_BASE + 12 };
-    uint32 const Quest_Kiljaeden[]     = { IPP_QUEST_BASE + 13 };
-    uint32 const Quest_Yogg[]          = { IPP_QUEST_BASE + 15 };
-    uint32 const Quest_Anubarak[]      = { IPP_QUEST_BASE + 16 };
-    uint32 const Quest_LichKing[]      = { IPP_QUEST_BASE + 17 };
-    uint32 const Quest_Halion[]        = { IPP_QUEST_BASE + 18 };
-
 #define TP_ARR(a) (a), uint8(sizeof(a) / sizeof((a)[0]))
 #define TP_NONE   nullptr, uint8(0)
 
     BossCreditDef const Catalog[] = {
-        { "azuregos",        "Azuregos",                 TP_ARR(Ent_Azuregos),       TP_NONE,                 TP_NONE },
-        { "kazzak",          "Lord Kazzak",              TP_ARR(Ent_Kazzak),         TP_NONE,                 TP_NONE },
-        { "ysondre",         "Ysondre",                  TP_ARR(Ent_Ysondre),        TP_NONE,                 TP_NONE },
-        { "lethon",          "Lethon",                   TP_ARR(Ent_Lethon),         TP_NONE,                 TP_NONE },
-        { "emeriss",         "Emeriss",                  TP_ARR(Ent_Emeriss),        TP_NONE,                 TP_NONE },
-        { "taerar",          "Taerar",                   TP_ARR(Ent_Taerar),         TP_NONE,                 TP_NONE },
-        { "doomwalker",      "Doomwalker",               TP_ARR(Ent_Doomwalker),     TP_NONE,                 TP_NONE },
-        { "doomlord_kazzak", "Doom Lord Kazzak",         TP_ARR(Ent_DoomlordKazzak), TP_NONE,                 TP_NONE },
+        { "azuregos",        "Azuregos",                 TP_ARR(Ent_Azuregos),       TP_NONE },
+        { "kazzak",          "Lord Kazzak",              TP_ARR(Ent_Kazzak),         TP_NONE },
+        { "ysondre",         "Ysondre",                  TP_ARR(Ent_Ysondre),        TP_NONE },
+        { "lethon",          "Lethon",                   TP_ARR(Ent_Lethon),         TP_NONE },
+        { "emeriss",         "Emeriss",                  TP_ARR(Ent_Emeriss),        TP_NONE },
+        { "taerar",          "Taerar",                   TP_ARR(Ent_Taerar),         TP_NONE },
+        { "doomwalker",      "Doomwalker",               TP_ARR(Ent_Doomwalker),     TP_NONE },
+        { "doomlord_kazzak", "Doom Lord Kazzak",         TP_ARR(Ent_DoomlordKazzak), TP_NONE },
 
-        { "onyxia",          "Onyxia",                   TP_ARR(Ent_Onyxia),         TP_ARR(Ach_Onyxia),      TP_ARR(Quest_Onyxia) },
-        { "ragnaros",        "Ragnaros",                 TP_ARR(Ent_Ragnaros),       TP_ARR(Ach_Ragnaros),    TP_ARR(Quest_Ragnaros) },
-        { "nefarian",        "Nefarian",                 TP_ARR(Ent_Nefarian),       TP_ARR(Ach_Nefarian),    TP_ARR(Quest_Nefarian) },
-        { "hakkar",          "Hakkar",                   TP_ARR(Ent_Hakkar),         TP_ARR(Ach_Hakkar),      TP_NONE },
-        { "ossirian",        "Ossirian the Unscarred",   TP_ARR(Ent_Ossirian),       TP_ARR(Ach_Ossirian),    TP_NONE },
-        { "cthun",           "C'Thun",                   TP_ARR(Ent_Cthun),          TP_ARR(Ach_Cthun),       TP_ARR(Quest_Cthun) },
-        { "kt_classic",      "Kel'Thuzad (Classic)",     TP_ARR(Ent_KtClassic),      TP_ARR(Ach_KtClassic),   TP_ARR(Quest_KtClassic) },
-        { "kt_wotlk",        "Kel'Thuzad (WotLK)",       TP_ARR(Ent_KtWotlk),        TP_ARR(Ach_KtWotlk),     TP_ARR(Quest_KtWotlk) },
+        { "onyxia",          "Onyxia",                   TP_ARR(Ent_Onyxia),         TP_ARR(Ach_Onyxia) },
+        { "ragnaros",        "Ragnaros",                 TP_ARR(Ent_Ragnaros),       TP_ARR(Ach_Ragnaros) },
+        { "nefarian",        "Nefarian",                 TP_ARR(Ent_Nefarian),       TP_ARR(Ach_Nefarian) },
+        { "hakkar",          "Hakkar",                   TP_ARR(Ent_Hakkar),         TP_ARR(Ach_Hakkar) },
+        { "ossirian",        "Ossirian the Unscarred",   TP_ARR(Ent_Ossirian),       TP_ARR(Ach_Ossirian) },
+        { "cthun",           "C'Thun",                   TP_ARR(Ent_Cthun),          TP_ARR(Ach_Cthun) },
+        { "kt_classic",      "Kel'Thuzad (Classic)",     TP_ARR(Ent_KtClassic),      TP_ARR(Ach_KtClassic) },
+        { "kt_wotlk",        "Kel'Thuzad (WotLK)",       TP_ARR(Ent_KtWotlk),        TP_ARR(Ach_KtWotlk) },
 
-        { "gruul",           "Gruul the Dragonkiller",   TP_ARR(Ent_Gruul),          TP_ARR(Ach_Gruul),       TP_NONE },
-        { "magtheridon",     "Magtheridon",              TP_ARR(Ent_Magtheridon),    TP_ARR(Ach_Magtheridon), TP_NONE },
-        { "vashj",           "Lady Vashj",               TP_ARR(Ent_Vashj),          TP_ARR(Ach_Vashj),       TP_NONE },
-        { "kaelthas",        "Kael'thas Sunstrider",     TP_ARR(Ent_Kaelthas),       TP_ARR(Ach_Kaelthas),    TP_ARR(Quest_Kaelthas) },
-        { "archimonde",      "Archimonde",               TP_ARR(Ent_Archimonde),     TP_ARR(Ach_Archimonde),  TP_NONE },
-        { "illidan",         "Illidan Stormrage",        TP_ARR(Ent_Illidan),        TP_ARR(Ach_Illidan),     TP_ARR(Quest_Illidan) },
-        { "zuljin",          "Zul'jin",                  TP_ARR(Ent_Zuljin),         TP_ARR(Ach_Zuljin),      TP_NONE },
-        { "kiljaeden",       "Kil'jaeden",               TP_ARR(Ent_Kiljaeden),      TP_ARR(Ach_Kiljaeden),   TP_ARR(Quest_Kiljaeden) },
+        { "gruul",           "Gruul the Dragonkiller",   TP_ARR(Ent_Gruul),          TP_ARR(Ach_Gruul) },
+        { "magtheridon",     "Magtheridon",              TP_ARR(Ent_Magtheridon),    TP_ARR(Ach_Magtheridon) },
+        { "vashj",           "Lady Vashj",               TP_ARR(Ent_Vashj),          TP_ARR(Ach_Vashj) },
+        { "kaelthas",        "Kael'thas Sunstrider",     TP_ARR(Ent_Kaelthas),       TP_ARR(Ach_Kaelthas) },
+        { "archimonde",      "Archimonde",               TP_ARR(Ent_Archimonde),     TP_ARR(Ach_Archimonde) },
+        { "illidan",         "Illidan Stormrage",        TP_ARR(Ent_Illidan),        TP_ARR(Ach_Illidan) },
+        { "zuljin",          "Zul'jin",                  TP_ARR(Ent_Zuljin),         TP_ARR(Ach_Zuljin) },
+        { "kiljaeden",       "Kil'jaeden",               TP_ARR(Ent_Kiljaeden),      TP_ARR(Ach_Kiljaeden) },
 
-        { "malygos",         "Malygos",                  TP_ARR(Ent_Malygos),        TP_ARR(Ach_Malygos),     TP_NONE },
-        { "sartharion",      "Sartharion",               TP_ARR(Ent_Sartharion),     TP_ARR(Ach_Sartharion),  TP_NONE },
-        { "yogg_saron",      "Yogg-Saron",               TP_ARR(Ent_Yogg),           TP_ARR(Ach_Yogg),        TP_ARR(Quest_Yogg) },
-        { "anubarak",        "Anub'arak",                TP_ARR(Ent_Anubarak),       TP_ARR(Ach_Anubarak),    TP_ARR(Quest_Anubarak) },
-        { "lich_king",       "The Lich King",            TP_ARR(Ent_LichKing),       TP_ARR(Ach_LichKing),    TP_ARR(Quest_LichKing) },
-        { "halion",          "Halion",                   TP_ARR(Ent_Halion),         TP_ARR(Ach_Halion),      TP_ARR(Quest_Halion) },
-        { "algalon",         "Algalon the Observer",     TP_ARR(Ent_Algalon),        TP_ARR(Ach_Algalon),     TP_NONE },
+        { "malygos",         "Malygos",                  TP_ARR(Ent_Malygos),        TP_ARR(Ach_Malygos) },
+        { "sartharion",      "Sartharion",               TP_ARR(Ent_Sartharion),     TP_ARR(Ach_Sartharion) },
+        { "yogg_saron",      "Yogg-Saron",               TP_ARR(Ent_Yogg),           TP_ARR(Ach_Yogg) },
+        { "anubarak",        "Anub'arak",                TP_ARR(Ent_Anubarak),       TP_ARR(Ach_Anubarak) },
+        { "lich_king",       "The Lich King",            TP_ARR(Ent_LichKing),       TP_ARR(Ach_LichKing) },
+        { "halion",          "Halion",                   TP_ARR(Ent_Halion),         TP_ARR(Ach_Halion) },
+        { "algalon",         "Algalon the Observer",     TP_ARR(Ent_Algalon),        TP_ARR(Ach_Algalon) },
     };
 
 #undef TP_ARR
@@ -266,26 +248,29 @@ namespace
 
     bool HasProvenCredit(Player* player, BossCreditDef const& def)
     {
+        // Achievements only. Individual Progression hidden quests (66000+N) mean
+        // "tier reached", and IP fills skipped states when a later boss is killed.
         for (uint8 i = 0; i < def.achievementCount; ++i)
             if (def.achievementIds[i] && player->HasAchieved(def.achievementIds[i]))
-                return true;
-
-        for (uint8 i = 0; i < def.ipQuestCount; ++i)
-            if (def.ipProgressionQuests[i] && player->GetQuestRewardStatus(def.ipProgressionQuests[i]))
                 return true;
 
         return false;
     }
 
-    void InsertCreditRow(uint32 guid, std::string const& creditId, uint32 sourceEntry)
+    bool InsertCreditRow(uint32 guid, std::string const& creditId, uint32 sourceEntry)
     {
         std::string safe = SanitizeCreditId(creditId);
         if (safe.empty())
-            return;
+            return false;
+
+        if (PlayerHasCredit(guid, safe))
+            return false;
 
         CharacterDatabase.DirectExecute(
-            "INSERT INTO aldr_first_kill_talent (guid, credit_id, source_entry) VALUES ({}, '{}', {})",
+            "INSERT IGNORE INTO aldr_first_kill_talent (guid, credit_id, source_entry) VALUES ({}, '{}', {})",
             guid, safe, sourceEntry);
+
+        return true;
     }
 
     void DeleteCreditRow(uint32 guid, std::string const& creditId)
@@ -305,10 +290,9 @@ namespace
             return;
 
         uint32 guid = player->GetGUID().GetCounter();
-        if (PlayerHasCredit(guid, def.id))
+        if (!InsertCreditRow(guid, def.id, sourceEntry))
             return;
 
-        InsertCreditRow(guid, def.id, sourceEntry);
         player->RewardExtraBonusTalentPoints(1);
         if (refreshTalents)
             player->InitTalentForLevel();
