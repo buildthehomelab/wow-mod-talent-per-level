@@ -13,11 +13,15 @@
 #include "Config.h"
 #include "Creature.h"
 #include "DatabaseEnv.h"
+#include "Group.h"
 #include "Log.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "Tokenize.h"
+#include "UnitScript.h"
+#include "WorldSession.h"
 #include <algorithm>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -350,6 +354,86 @@ namespace
         AwardCredit(player, *defIt->second, killed->GetEntry(), "first kill", true);
     }
 
+    Player* ResolveCreditPlayer(Unit* unit)
+    {
+        if (!unit)
+            return nullptr;
+
+        if (Player* player = unit->ToPlayer())
+            return player;
+
+        return unit->GetCharmerOrOwnerPlayerOrPlayerItself();
+    }
+
+    bool IsRealPlayer(Player* player)
+    {
+        return player && player->GetSession() && !player->GetSession()->IsBot();
+    }
+
+    void AwardGroupMembers(Group* group, Creature* killed, Unit* killer, std::function<void(Player*)> const& consider)
+    {
+        if (!group)
+            return;
+
+        for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
+        {
+            Player* member = itr->GetSource();
+            if (!member)
+                continue;
+
+            if (killer == member || member->IsAtGroupRewardDistance(killed))
+                consider(member);
+        }
+    }
+
+    // Last-hit is not enough: playerbots and Taerar shades often land the killing blow.
+    // Credit every real player who would share XP / loot for this kill.
+    void AwardKillCreditToParticipants(Creature* killed, Unit* killer)
+    {
+        if (!killed)
+            return;
+
+        if (EntryToCredit.find(killed->GetEntry()) == EntryToCredit.end())
+            return;
+
+        std::unordered_set<uint32> seen;
+        auto consider = [&](Player* player)
+        {
+            if (!IsRealPlayer(player))
+                return;
+
+            if (!seen.insert(player->GetGUID().GetCounter()).second)
+                return;
+
+            TryAwardKillCredit(player, killed);
+        };
+
+        if (Player* killerPlayer = ResolveCreditPlayer(killer))
+        {
+            consider(killerPlayer);
+            AwardGroupMembers(killerPlayer->GetGroup(), killed, killer, consider);
+        }
+
+        if (Player* loot = killed->GetLootRecipient())
+        {
+            consider(loot);
+            Group* lootGroup = killed->GetLootRecipientGroup();
+            AwardGroupMembers(lootGroup ? lootGroup : loot->GetGroup(), killed, killer, consider);
+        }
+        else
+            AwardGroupMembers(killed->GetLootRecipientGroup(), killed, killer, consider);
+
+        for (ThreatReference const* ref : killed->GetThreatMgr().GetUnsortedThreatList())
+        {
+            if (!ref)
+                continue;
+
+            if (Player* tagged = ResolveCreditPlayer(ref->GetVictim()))
+                if (killer == tagged || tagged->IsAtGroupRewardDistance(killed))
+                    consider(tagged);
+        }
+    }
+
     void ReconcilePlayerCredits(Player* player)
     {
         if (!player)
@@ -393,6 +477,23 @@ namespace
             }
         }
 
+        // Rows can exist without a bonus point (missed last-hit, GM insert). Catch up on login.
+        have = LoadPlayerCredits(guid);
+        uint32 enabledCreditCount = 0;
+        for (std::string const& creditId : have)
+            if (!creditId.empty() && IsCreditEnabled(creditId))
+                ++enabledCreditCount;
+
+        uint32 bonus = player->GetBonusTalentCount();
+        if (enabledCreditCount > bonus)
+        {
+            uint32 missing = enabledCreditCount - bonus;
+            player->RewardExtraBonusTalentPoints(missing);
+            changed = true;
+            LOG_INFO("module", "TalentProgression: {} synced +{} bonus talent(s) to {} credit(s)",
+                player->GetName(), missing, enabledCreditCount);
+        }
+
         if (changed)
             player->InitTalentForLevel();
     }
@@ -403,9 +504,7 @@ class TalentProgression_Player : public PlayerScript
 public:
     TalentProgression_Player() : PlayerScript("TalentProgression_Player", {
         PLAYERHOOK_ON_LOGIN,
-        PLAYERHOOK_ON_CALCULATE_TALENTS_POINTS,
-        PLAYERHOOK_ON_CREATURE_KILL,
-        PLAYERHOOK_ON_CREATURE_KILLED_BY_PET
+        PLAYERHOOK_ON_CALCULATE_TALENTS_POINTS
     }) { }
 
     void OnPlayerLogin(Player* player) override
@@ -425,15 +524,21 @@ public:
         uint32 bonus = talentPointsForLevel > blizzBase ? talentPointsForLevel - blizzBase : 0;
         talentPointsForLevel = uint32(level) + bonus;
     }
+};
 
-    void OnPlayerCreatureKill(Player* killer, Creature* killed) override
-    {
-        TryAwardKillCredit(killer, killed);
-    }
+class TalentProgression_Unit : public UnitScript
+{
+public:
+    TalentProgression_Unit() : UnitScript("TalentProgression_Unit", true, {
+        UNITHOOK_ON_UNIT_DEATH
+    }) { }
 
-    void OnPlayerCreatureKilledByPet(Player* petOwner, Creature* killed) override
+    void OnUnitDeath(Unit* unit, Unit* killer) override
     {
-        TryAwardKillCredit(petOwner, killed);
+        if (!unit || !unit->IsCreature())
+            return;
+
+        AwardKillCreditToParticipants(unit->ToCreature(), killer);
     }
 };
 
@@ -463,5 +568,6 @@ public:
 void AddTalentProgressionScripts()
 {
     new TalentProgression_Player();
+    new TalentProgression_Unit();
     new TalentProgression_World();
 }
