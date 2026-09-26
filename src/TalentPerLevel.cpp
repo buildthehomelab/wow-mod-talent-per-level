@@ -12,19 +12,19 @@
 #include "ScriptMgr.h"
 #include <algorithm>
 
-class TalentProgression_Player : public PlayerScript
+class TalentPerLevel_Player : public PlayerScript
 {
 public:
-    TalentProgression_Player() : PlayerScript("TalentProgression_Player", {
+    TalentPerLevel_Player() : PlayerScript("TalentPerLevel_Player", {
         PLAYERHOOK_ON_CALCULATE_TALENTS_POINTS
     }) { }
 
     void OnPlayerCalculateTalentsPoints(Player const* player, uint32& talentPointsForLevel) override
     {
-        if (!sConfigMgr->GetOption<bool>("TalentProgression.Enable", true))
+        if (!sConfigMgr->GetOption<bool>("TalentPerLevel.Enable", true))
             return;
 
-        uint8 maxLevel = sConfigMgr->GetOption<uint8>("TalentProgression.MaxLevel", 80);
+        uint8 maxLevel = sConfigMgr->GetOption<uint8>("TalentPerLevel.MaxLevel", 80);
         uint8 level = std::min<uint8>(player->GetLevel(), maxLevel);
 
         uint32 blizzBase = level < 10 ? 0 : uint32(level) - 9;
@@ -33,23 +33,23 @@ public:
     }
 };
 
-class TalentProgression_World : public WorldScript
+class TalentPerLevel_World : public WorldScript
 {
 public:
-    TalentProgression_World() : WorldScript("TalentProgression_World") { }
+    TalentPerLevel_World() : WorldScript("TalentPerLevel_World") { }
 
     void OnAfterConfigLoad(bool /*reload*/) override
     {
-        if (!sConfigMgr->GetOption<bool>("TalentProgression.Enable", true))
+        if (!sConfigMgr->GetOption<bool>("TalentPerLevel.Enable", true))
             return;
 
-        LOG_INFO("server.loading", "TalentProgression: 1 talent/level through level {}",
-            sConfigMgr->GetOption<uint8>("TalentProgression.MaxLevel", 80));
+        LOG_INFO("server.loading", "TalentPerLevel: 1 talent/level through level {}",
+            sConfigMgr->GetOption<uint8>("TalentPerLevel.MaxLevel", 80));
     }
 };
 
-void AddTalentProgressionScripts()
+void AddTalentPerLevelScripts()
 {
-    new TalentProgression_Player();
-    new TalentProgression_World();
+    new TalentPerLevel_Player();
+    new TalentPerLevel_World();
 }

@@ -1,19 +1,19 @@
 #
-# mod-talent-progression configuration
+# mod-talent-per-level configuration
 #
 
 #
-#    TalentProgression.Enable
+#    TalentPerLevel.Enable
 #        Description: Enable 1 talent point per level from 1–MaxLevel (replaces Blizzard L10 start).
 #        Default:     1
 #
 
-TalentProgression.Enable = 1
+TalentPerLevel.Enable = 1
 
 #
-#    TalentProgression.MaxLevel
+#    TalentPerLevel.MaxLevel
 #        Description: Cap level used for the 1:1 talent curve.
 #        Default:     80
 #
 
-TalentProgression.MaxLevel = 80
+TalentPerLevel.MaxLevel = 80
